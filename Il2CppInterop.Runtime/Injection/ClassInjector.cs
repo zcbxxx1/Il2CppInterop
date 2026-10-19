@@ -275,43 +275,51 @@ public static unsafe partial class ClassInjector
 
             try
             {
-                int found = 0;
+                bool gotProps = false, gotEvents = false, gotFields = false, gotIfaces = false, gotNested = false;
                 foreach (var img in IL2CPP.GetIl2CppImages())
                 {
                     uint cnt = IL2CPP.il2cpp_image_get_class_count(img);
-                    for (uint ci = 0; ci < cnt && found < 3; ci++)
+                    for (uint ci = 0; ci < cnt; ci++)
                     {
+                        if (gotProps && gotEvents && gotFields && gotIfaces && gotNested) break;
                         IntPtr c = IL2CPP.il2cpp_image_get_class(img, ci);
                         if (c == IntPtr.Zero) continue;
-                        IntPtr t1 = IntPtr.Zero;
-                        IntPtr pp = IL2CPP.il2cpp_class_get_properties(c, ref t1);
-                        IntPtr t2 = IntPtr.Zero;
-                        IntPtr ee = IL2CPP.il2cpp_class_get_events(c, ref t2);
-                        IntPtr t3 = IntPtr.Zero;
-                        IntPtr nn = IL2CPP.il2cpp_class_get_nested_types(c, ref t3);
-                        IntPtr t4 = IntPtr.Zero;
-                        IntPtr ii = IL2CPP.il2cpp_class_get_interfaces(c, ref t4);
-                        if (pp != IntPtr.Zero || ee != IntPtr.Zero || nn != IntPtr.Zero || ii != IntPtr.Zero)
+
+                        IntPtr a1 = IntPtr.Zero; IntPtr pp = IL2CPP.il2cpp_class_get_properties(c, ref a1);
+                        IntPtr a2 = IntPtr.Zero; IntPtr ee = IL2CPP.il2cpp_class_get_events(c, ref a2);
+                        IntPtr a3 = IntPtr.Zero; IntPtr ff = IL2CPP.il2cpp_class_get_fields(c, ref a3);
+                        IntPtr a4 = IntPtr.Zero; IntPtr ii = IL2CPP.il2cpp_class_get_interfaces(c, ref a4);
+                        IntPtr a5 = IntPtr.Zero; IntPtr nn = IL2CPP.il2cpp_class_get_nested_types(c, ref a5);
+
+                        bool want = (!gotProps && pp != IntPtr.Zero) || (!gotEvents && ee != IntPtr.Zero)
+                                 || (!gotFields && ff != IntPtr.Zero) || (!gotIfaces && ii != IntPtr.Zero)
+                                 || (!gotNested && nn != IntPtr.Zero);
+                        if (!want) continue;
+
+                        if (!gotProps && pp != IntPtr.Zero) gotProps = true;
+                        if (!gotEvents && ee != IntPtr.Zero) gotEvents = true;
+                        if (!gotFields && ff != IntPtr.Zero) gotFields = true;
+                        if (!gotIfaces && ii != IntPtr.Zero) gotIfaces = true;
+                        if (!gotNested && nn != IntPtr.Zero) gotNested = true;
+
+                        L($"--- HIT {IL2CPP.il2cpp_class_get_name_(c)} ns={IL2CPP.il2cpp_class_get_namespace_(c)} klass=0x{c.ToInt64():X} ---");
+                        L($"  props[0]=0x{pp.ToInt64():X} iter=0x{a1.ToInt64():X}");
+                        L($"  events[0]=0x{ee.ToInt64():X} iter=0x{a2.ToInt64():X}");
+                        L($"  fields[0]=0x{ff.ToInt64():X} iter=0x{a3.ToInt64():X}");
+                        L($"  ifaces[0]=0x{ii.ToInt64():X} iter=0x{a4.ToInt64():X}");
+                        L($"  nested[0]=0x{nn.ToInt64():X} iter=0x{a5.ToInt64():X}");
+                        byte* cr = (byte*)c;
+                        for (int off = 0x78; off < 0xE0; off += 8)
                         {
-                            found++;
-                            L($"--- RICH {found}: {IL2CPP.il2cpp_class_get_name_(c)} ns={IL2CPP.il2cpp_class_get_namespace_(c)} klass=0x{c.ToInt64():X} ---");
-                            L($"  props[0]=0x{pp.ToInt64():X} iter=0x{t1.ToInt64():X} baseG=0x{(t1.ToInt64()-8):X}");
-                            L($"  events[0]=0x{ee.ToInt64():X} iter=0x{t2.ToInt64():X} baseG=0x{(t2.ToInt64()-8):X}");
-                            L($"  nested[0]=0x{nn.ToInt64():X} iter=0x{t3.ToInt64():X} baseG=0x{(t3.ToInt64()-8):X}");
-                            L($"  ifaces[0]=0x{ii.ToInt64():X} iter=0x{t4.ToInt64():X} baseG=0x{(t4.ToInt64()-8):X}");
-                            byte* cr = (byte*)c;
-                            for (int off = 0x78; off < 0x100; off += 8)
-                            {
-                                ulong v = 0; for (int b = 0; b < 8; b++) v |= (ulong)cr[off + b] << (8 * b);
-                                L($"    +0x{off:X3}: 0x{v:X16}");
-                            }
+                            ulong v = 0; for (int b = 0; b < 8; b++) v |= (ulong)cr[off + b] << (8 * b);
+                            L($"    +0x{off:X3}: 0x{v:X16}");
                         }
                     }
-                    if (found >= 3) break;
+                    if (gotProps && gotEvents && gotFields && gotIfaces && gotNested) break;
                 }
-                if (found == 0) L("(no rich class found)");
+                L($"flags: props={gotProps} events={gotEvents} fields={gotFields} ifaces={gotIfaces} nested={gotNested}");
             }
-            catch (Exception ex) { L("rich scan failed: " + ex.GetType().Name + ": " + ex.Message); }
+            catch (Exception ex) { L("scan failed: " + ex.GetType().Name + ": " + ex.Message); }
 
             Logger.Instance.LogWarning("[CAL]\n{D}", sb.ToString());
         }
