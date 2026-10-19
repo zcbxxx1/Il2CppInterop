@@ -160,6 +160,32 @@ public static unsafe partial class ClassInjector
         RegisterTypeInIl2Cpp(typeof(T), options);
     }
 
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CalibMbi
+    {
+        public IntPtr BaseAddress;
+        public IntPtr AllocationBase;
+        public uint AllocationProtect;
+        public IntPtr RegionSize;
+        public uint State;
+        public uint Protect;
+        public uint Type;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern UIntPtr VirtualQuery(IntPtr lpAddress, out CalibMbi lpBuffer, UIntPtr dwLength);
+
+    private static bool CalibIsReadable(IntPtr addr)
+    {
+        CalibMbi mbi;
+        if (VirtualQuery(addr, out mbi, (UIntPtr)Marshal.SizeOf<CalibMbi>()) == UIntPtr.Zero) return false;
+        if (mbi.State != 0x1000) return false;
+        if ((mbi.Protect & 0x100) != 0) return false;
+        const uint readable = 0x02 | 0x04 | 0x08 | 0x20 | 0x40 | 0x80;
+        return (mbi.Protect & readable) != 0;
+    }
+
     public static void RegisterTypeInIl2Cpp(Type type, RegisterTypeOptions options)
     {
         var interfaces = options.Interfaces;
@@ -198,42 +224,96 @@ public static unsafe partial class ClassInjector
         // Initialize the vtable of all base types (Class::Init is recursive internally)
         InjectorHelpers.ClassInit(baseClassPointer.ClassPointer);
 
-        // TEMP DIAGNOSTIC
+        // TEMP CALIBRATION
         {
-            byte* raw = (byte*)baseClassPointer.ClassPointer;
-            var sb = new System.Text.StringBuilder();
-            for (int k = 0; k < 0x140; k += 8)
+            IntPtr k = (IntPtr)baseClassPointer.ClassPointer;
+            byte* raw = (byte*)k;
+            var sb = new StringBuilder();
+            void L(string s) => sb.AppendLine(s);
+
+            L($"klass=0x{k.ToInt64():X} name='{IL2CPP.il2cpp_class_get_name_(k)}' ns='{IL2CPP.il2cpp_class_get_namespace_(k)}'");
+            L($"G instance_size={IL2CPP.il2cpp_class_instance_size(k)} flags=0x{IL2CPP.il2cpp_class_get_flags(k):X} token=0x{IL2CPP.il2cpp_class_get_type_token(k):X} rank={IL2CPP.il2cpp_class_get_rank(k)} num_fields={IL2CPP.il2cpp_class_num_fields(k)}");
+            L($"G image=0x{IL2CPP.il2cpp_class_get_image(k).ToInt64():X} parent=0x{IL2CPP.il2cpp_class_get_parent(k).ToInt64():X} decl=0x{IL2CPP.il2cpp_class_get_declaring_type(k).ToInt64():X} elem=0x{IL2CPP.il2cpp_class_get_element_class(k).ToInt64():X}");
+
+            IntPtr itM = IntPtr.Zero;
+            IntPtr m0 = IL2CPP.il2cpp_class_get_methods(k, ref itM);
+            L($"A methods[0]=0x{m0.ToInt64():X} iter=0x{itM.ToInt64():X} baseGuess=0x{(itM.ToInt64() - 8):X}");
+            IntPtr itF = IntPtr.Zero;
+            IntPtr f0 = IL2CPP.il2cpp_class_get_fields(k, ref itF);
+            L($"A fields[0]=0x{f0.ToInt64():X} iter=0x{itF.ToInt64():X}");
+            IntPtr itP = IntPtr.Zero;
+            IntPtr p0 = IL2CPP.il2cpp_class_get_properties(k, ref itP);
+            L($"A properties[0]=0x{p0.ToInt64():X} iter=0x{itP.ToInt64():X}");
+            IntPtr itE = IntPtr.Zero;
+            IntPtr e0 = IL2CPP.il2cpp_class_get_events(k, ref itE);
+            L($"A events[0]=0x{e0.ToInt64():X} iter=0x{itE.ToInt64():X}");
+            IntPtr itN = IntPtr.Zero;
+            IntPtr n0 = IL2CPP.il2cpp_class_get_nested_types(k, ref itN);
+            L($"A nestedTypes[0]=0x{n0.ToInt64():X} iter=0x{itN.ToInt64():X}");
+            IntPtr itI = IntPtr.Zero;
+            IntPtr i0 = IL2CPP.il2cpp_class_get_interfaces(k, ref itI);
+            L($"A interfaces[0]=0x{i0.ToInt64():X} iter=0x{itI.ToInt64():X}");
+
+            for (int off = 0; off < 0x140; off += 8)
             {
                 ulong v = 0;
-                for (int b = 0; b < 8; b++) v |= (ulong)raw[k + b] << (8 * b);
-                sb.Append($"{k:X3}:{v:X16} ");
-                if ((k / 8) % 4 == 3) sb.AppendLine();
+                for (int b = 0; b < 8; b++) v |= (ulong)raw[off + b] << (8 * b);
+                string ann = "";
+                if (v > 0x10000UL && v < 0x7FFFFFFFFFFFUL && (v & 7) == 0)
+                {
+                    if (CalibIsReadable((IntPtr)(long)v))
+                    {
+                        byte* t = (byte*)v;
+                        ulong w = 0;
+                        for (int b = 0; b < 8; b++) w |= (ulong)t[b] << (8 * b);
+                        ann = $"-> [0x{w:X}]";
+                    }
+                    else ann = "-> <unreadable>";
+                }
+                L($"0x{off:X3}: 0x{v:X16} {ann}");
             }
 
-            string nameAt0 = "n/a";
-            try { var np = *(byte**)raw; if (np != null) nameAt0 = System.Runtime.InteropServices.Marshal.PtrToStringAnsi((IntPtr)np) ?? "?"; } catch { }
-
-            // byval_arg: Class_29_2 treats this as an inline 16-byte struct; probe both readings
-            string argProbe = "";
             try
             {
-                // reading A: inline struct at 0x10 -> data(8) attrs(2) type(1) bitfield(1)
-                byte typeA = *(raw + 0x10 + 10);
-                // reading B: pointer at 0x10, then Il2CppType* body
-                var pB = *(byte**)(raw + 0x10);
-                byte typeB = 0;
-                if (pB != null) { var q = (byte*)((nuint)pB & ~(nuint)7); typeB = *(q + 10); }
-                // reading C: pointer at 0x10, Il2CppType body at +0x10 relative (inline 2027 layout)
-                byte typeC = *(raw + 0x20 + 10);
-                argProbe = $"typeInline0x10={typeA} typePtrB={typeB} typeInline0x20={typeC}";
+                int found = 0;
+                foreach (var img in IL2CPP.GetIl2CppImages())
+                {
+                    uint cnt = IL2CPP.il2cpp_image_get_class_count(img);
+                    for (uint ci = 0; ci < cnt && found < 3; ci++)
+                    {
+                        IntPtr c = IL2CPP.il2cpp_image_get_class(img, ci);
+                        if (c == IntPtr.Zero) continue;
+                        IntPtr t1 = IntPtr.Zero;
+                        IntPtr pp = IL2CPP.il2cpp_class_get_properties(c, ref t1);
+                        IntPtr t2 = IntPtr.Zero;
+                        IntPtr ee = IL2CPP.il2cpp_class_get_events(c, ref t2);
+                        IntPtr t3 = IntPtr.Zero;
+                        IntPtr nn = IL2CPP.il2cpp_class_get_nested_types(c, ref t3);
+                        IntPtr t4 = IntPtr.Zero;
+                        IntPtr ii = IL2CPP.il2cpp_class_get_interfaces(c, ref t4);
+                        if (pp != IntPtr.Zero || ee != IntPtr.Zero || nn != IntPtr.Zero || ii != IntPtr.Zero)
+                        {
+                            found++;
+                            L($"--- RICH {found}: {IL2CPP.il2cpp_class_get_name_(c)} ns={IL2CPP.il2cpp_class_get_namespace_(c)} klass=0x{c.ToInt64():X} ---");
+                            L($"  props[0]=0x{pp.ToInt64():X} iter=0x{t1.ToInt64():X} baseG=0x{(t1.ToInt64()-8):X}");
+                            L($"  events[0]=0x{ee.ToInt64():X} iter=0x{t2.ToInt64():X} baseG=0x{(t2.ToInt64()-8):X}");
+                            L($"  nested[0]=0x{nn.ToInt64():X} iter=0x{t3.ToInt64():X} baseG=0x{(t3.ToInt64()-8):X}");
+                            L($"  ifaces[0]=0x{ii.ToInt64():X} iter=0x{t4.ToInt64():X} baseG=0x{(t4.ToInt64()-8):X}");
+                            byte* cr = (byte*)c;
+                            for (int off = 0x78; off < 0x100; off += 8)
+                            {
+                                ulong v = 0; for (int b = 0; b < 8; b++) v |= (ulong)cr[off + b] << (8 * b);
+                                L($"    +0x{off:X3}: 0x{v:X16}");
+                            }
+                        }
+                    }
+                    if (found >= 3) break;
+                }
+                if (found == 0) L("(no rich class found)");
             }
-            catch (Exception ex) { argProbe = "probe failed: " + ex.GetType().Name; }
+            catch (Exception ex) { L("rich scan failed: " + ex.GetType().Name + ": " + ex.Message); }
 
-            Logger.Instance.LogWarning(
-                "[DIAG] baseType={T} ptr=0x{P:X} name={N} VT={VT} ET={ET} IG={IG} Flags=0x{F:X}\n[DIAG] {Probe}",
-                type.Name, (long)raw, nameAt0, baseClassPointer.ValueType, baseClassPointer.EnumType,
-                baseClassPointer.IsGeneric, (uint)baseClassPointer.Flags, argProbe);
-            Logger.Instance.LogWarning("[DIAG] DUMP {T}:\n{D}", type.Name, sb.ToString());
+            Logger.Instance.LogWarning("[CAL]\n{D}", sb.ToString());
         }
 
         if (baseClassPointer.ValueType || baseClassPointer.EnumType)
