@@ -232,7 +232,7 @@ public static unsafe partial class ClassInjector
             void L(string s) => sb.AppendLine(s);
 
             var ch = UnityVersionHandler.Wrap((Il2CppClass*)baseClassPointer.ClassPointer);
-            L($"HANDLER={UnityVersionHandler.GetType().Name} size={Marshal.SizeOf<Il2CppInterop.Runtime.Runtime.VersionSpecific.Class.NativeClassStructHandler_31_0.Il2CppClass_31_0>()} vtOff={(ch.VTable.ToInt64() - k.ToInt64()):X}");
+            L($"size={Marshal.SizeOf<Il2CppInterop.Runtime.Runtime.VersionSpecific.Class.NativeClassStructHandler_31_0.Il2CppClass_31_0>()} vtOff={(ch.VTable.ToInt64() - k.ToInt64()):X}");
             L($"SELFCHECK EnumType={ch.EnumType} IsGeneric={ch.IsGeneric} ValueType={ch.ValueType} Initialized={ch.Initialized} InstSize={ch.InstanceSize} MethodCount={ch.MethodCount} FieldCount={ch.FieldCount} IfaceCount={ch.InterfaceCount} VtableCount={ch.VtableCount} Flags=0x{(uint)ch.Flags:X} Name='{Marshal.PtrToStringUTF8(ch.Name)}'");
             L($"klass=0x{k.ToInt64():X} name='{IL2CPP.il2cpp_class_get_name_(k)}' ns='{IL2CPP.il2cpp_class_get_namespace_(k)}'");
             L($"G instance_size={IL2CPP.il2cpp_class_instance_size(k)} flags=0x{IL2CPP.il2cpp_class_get_flags(k):X} token=0x{IL2CPP.il2cpp_class_get_type_token(k):X} rank={IL2CPP.il2cpp_class_get_rank(k)} num_fields={IL2CPP.il2cpp_class_num_fields(k)}");
