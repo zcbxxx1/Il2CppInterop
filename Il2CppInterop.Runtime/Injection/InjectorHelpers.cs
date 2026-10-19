@@ -159,6 +159,17 @@ namespace Il2CppInterop.Runtime.Injection
                 pattern = "\xE8\x00\x00\x00\x00\x0F\xB7\x47\x48\x48",
                 mask = "x????xxxxx",
                 xref = true
+            },
+            // Unity 6000.6+ (Battle Nations, metadata 108): the call to Class::Init inside il2cpp_class_has_references
+            // is followed by the export's own re-check of the initialized flag. The klass pointer lives in RBX and the
+            // flag offsets moved from 0x136/0x135 (Unity 2022.3) to 0x12E/0x12D, so none of the older signatures match.
+            // Verified unique within a 100 MB GameAssembly.dll; xref resolves to the Class::Init body, which opens with
+            // "mov rbx, rcx; test byte [rcx+12Eh], 1".
+            new MemoryUtils.SignatureDefinition
+            {
+                pattern = "\xE8\x00\x00\x00\x00\xF6\x83\x2E\x01\x00\x00\x01\x74\x00\x0F\xB6\x83\x2D\x01\x00\x00\xC0",
+                mask = "x????xxxxxxxx?xxxxxxxxx",
+                xref = true
             }
         };
 
