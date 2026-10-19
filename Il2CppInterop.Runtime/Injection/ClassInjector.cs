@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
@@ -197,6 +197,44 @@ public static unsafe partial class ClassInjector
 
         // Initialize the vtable of all base types (Class::Init is recursive internally)
         InjectorHelpers.ClassInit(baseClassPointer.ClassPointer);
+
+        // TEMP DIAGNOSTIC
+        {
+            byte* raw = (byte*)baseClassPointer.ClassPointer;
+            var sb = new System.Text.StringBuilder();
+            for (int k = 0; k < 0x140; k += 8)
+            {
+                ulong v = 0;
+                for (int b = 0; b < 8; b++) v |= (ulong)raw[k + b] << (8 * b);
+                sb.Append($"{k:X3}:{v:X16} ");
+                if ((k / 8) % 4 == 3) sb.AppendLine();
+            }
+
+            string nameAt0 = "n/a";
+            try { var np = *(byte**)raw; if (np != null) nameAt0 = System.Runtime.InteropServices.Marshal.PtrToStringAnsi((IntPtr)np) ?? "?"; } catch { }
+
+            // byval_arg: Class_29_2 treats this as an inline 16-byte struct; probe both readings
+            string argProbe = "";
+            try
+            {
+                // reading A: inline struct at 0x10 -> data(8) attrs(2) type(1) bitfield(1)
+                byte typeA = *(raw + 0x10 + 10);
+                // reading B: pointer at 0x10, then Il2CppType* body
+                var pB = *(byte**)(raw + 0x10);
+                byte typeB = 0;
+                if (pB != null) { var q = (byte*)((nuint)pB & ~(nuint)7); typeB = *(q + 10); }
+                // reading C: pointer at 0x10, Il2CppType body at +0x10 relative (inline 2027 layout)
+                byte typeC = *(raw + 0x20 + 10);
+                argProbe = $"typeInline0x10={typeA} typePtrB={typeB} typeInline0x20={typeC}";
+            }
+            catch (Exception ex) { argProbe = "probe failed: " + ex.GetType().Name; }
+
+            Logger.Instance.LogWarning(
+                "[DIAG] baseType={T} ptr=0x{P:X} name={N} VT={VT} ET={ET} IG={IG} Flags=0x{F:X}\n[DIAG] {Probe}",
+                type.Name, (long)raw, nameAt0, baseClassPointer.ValueType, baseClassPointer.EnumType,
+                baseClassPointer.IsGeneric, (uint)baseClassPointer.Flags, argProbe);
+            Logger.Instance.LogWarning("[DIAG] DUMP {T}:\n{D}", type.Name, sb.ToString());
+        }
 
         if (baseClassPointer.ValueType || baseClassPointer.EnumType)
             throw new ArgumentException($"Base class {baseType} is value type and can't be inherited from");
